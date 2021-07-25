@@ -1,3 +1,4 @@
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 
 static final int WIDTH = 1024;
@@ -12,6 +13,7 @@ static final int MAX_ITERATIONS_B = 20;
 static final int MAX_ITERATIONS_MAX = max(MAX_ITERATIONS_R, MAX_ITERATIONS_G, MAX_ITERATIONS_B);
 static final int MAX_ITERATIONS_DIV = 2000;
 static final boolean ANTI_BUDDHABROT = false;
+static final int THREADS = 4;
 static final double MIN_X_CALC = -2.5;
 static final double MIN_Y_CALC = -2;
 static final double MAX_X_CALC = 1.5;
@@ -20,7 +22,7 @@ static final int WIDTH_CALC = 8186;
 static final int HEIGHT_CALC = 8186;
 static final String FILE_NAME = "nebulabrot.png";
 
-volatile boolean finished = false;
+AtomicInteger finished;
 AtomicIntegerArray counters_r;
 AtomicIntegerArray counters_g;
 AtomicIntegerArray counters_b;
@@ -30,10 +32,15 @@ void settings() {
 }
 
 void setup() {
+  finished = new AtomicInteger();
   counters_r = new AtomicIntegerArray(WIDTH * HEIGHT);
   counters_g = new AtomicIntegerArray(WIDTH * HEIGHT);
   counters_b = new AtomicIntegerArray(WIDTH * HEIGHT);
-  thread("calculateAll");
+  for (int i = 0; i < THREADS; i++) {
+    final int thread = i;
+    Thread t = new Thread(() -> calculateAll(thread));
+    t.start();
+  }
 }
 
 void draw() {
@@ -50,7 +57,7 @@ void draw() {
         (int) lerp(0, 255, colorFunction((double) counters_b.get(index) / max_b))));
     }
   }
-  if (finished) {
+  if (finished.get() >= THREADS) {
     noLoop();
     save(FILE_NAME);
     println("Finished rendering");
@@ -72,14 +79,16 @@ int max(AtomicIntegerArray arr) {
   return max;
 }
 
-void calculateAll() {
-  for (int y = 0; y < HEIGHT_CALC; y++) {
+void calculateAll(int thread) {
+  int first = thread * HEIGHT_CALC / THREADS;
+  int last = min((thread + 1) * HEIGHT_CALC / THREADS, HEIGHT_CALC);
+  for (int y = first; y < last; y++) {
     for (int x = 0; x < WIDTH_CALC; x++) {
       double currX = lerp(MIN_X_CALC, MAX_X_CALC, (double) x / WIDTH_CALC);
       double currY = lerp(MIN_Y_CALC, MAX_Y_CALC, (double) y / HEIGHT_CALC);
       if (ANTI_BUDDHABROT == isInMandelbrot(currX, currY)) {
-        double prevA = 0;
-        double prevB = 0;
+        double prevA = currX;
+        double prevB = currY;
         for (int iter = 0; iter <= MAX_ITERATIONS_MAX; iter++) {
           double newA = prevA * prevA - prevB * prevB + currX;
           double newB = 2 * prevA * prevB + currY;
@@ -102,7 +111,7 @@ void calculateAll() {
       }
     }
   }
-  finished = true;
+  finished.addAndGet(1);
 }
 
 int getIndexOfComplex(double a, double b) {
@@ -155,10 +164,10 @@ int round(double n) {
   return (int) Math.round(n);
 }
 
-double colorFunctionOld(double a) {
+double colorFunction(double a) {
   return 2.0 / (1.0 + 1.0 / a);
 }
 
-double colorFunction(double a) {
+double colorFunctionOld(double a) {
   return a;
 }
